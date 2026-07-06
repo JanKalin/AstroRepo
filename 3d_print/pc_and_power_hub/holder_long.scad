@@ -103,7 +103,7 @@ difference(){
   for( y = [-20, -45, -70] ){
     translate([0, y, -h_dovetail + 2.6]) clamp_912_562(M=5, gap=15, extra_length=2.3, nut_centered=true, pyramid_nut_support=true, nut_support=0.6);
   }
-  for( x = [-7, 7] ){
+  for( x = [-6, 6] ){
     translate([x, -5, -6]) rotate([-90, 0, 0]) clamp_912_562(M=4, gap=5, extra_length=1, nut_centered=true);
   }
 }
