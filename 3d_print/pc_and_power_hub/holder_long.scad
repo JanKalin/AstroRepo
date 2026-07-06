@@ -11,11 +11,11 @@ h_pc_holes = 47;
 // Hole diameter (M3)
 D_pc_hole = 3.25;
 
-// Width of PC horns
-w_pc_horns = 10;
+// Washer width
+D_pc_washer = 9 + 0.5;
 
-// Width of hub horns
-w_hub_horns = 25;
+// Width of PC horns
+w_pc_horns = D_pc_washer + 2*3;
 
 // Thickness of horns
 t_horns = 2;
@@ -29,6 +29,12 @@ w_pc_stem = 2;
 // Diameter of hub holes (M4)
 D_hub_hole = 4.25;
 
+// Washer diameter
+D_hub_washer = 15 + 0.5;
+
+// Width of hub horns
+w_hub_horns = D_hub_washer + 2*3;
+
 // Distance between hub holes
 d_hub_holes = 20;
 
@@ -36,16 +42,16 @@ d_hub_holes = 20;
 h_hub_holes = 100.5/2;
 
 // Upper width of dovetail
-w_dovetail_upper = 20;
+w_dovetail_upper = 23;
 
 // Lower width of dovetail
-w_dovetail_lower = 32;
+w_dovetail_lower = 33;
 
 // Height of dovetail
 h_dovetail = 10;
 
 // Dovetail clearance
-clearance = 1;
+clearance = 2;
 
 // Dovetail deck (thickness of horns)
 deck = t_horns;
@@ -109,17 +115,21 @@ module horn(l, h, t, w, D, d=0, head=0){
     union(){
       linear_extrude(w){
         square([l - 2*t, t]);
-        translate([l - t, 2*t]) square([t, h - 2*t]);
+        #translate([l - t, 2*t]) square([t, h + w/2 - 2*t - t/2]);
       }
       translate([l - 2*t, 2*t]) rotate([0, 0, -90]) rotate_extrude(angle=90) polygon([[t, 0], [2*t, 0], [2*t, w], [t, w]]);
-      translate([l, h, w/2]) rotate([0, -90, 0]) cylinder(d=w, h=t);
+      //translate([l, h, w/2]) rotate([0, -90, 0]) cylinder(d=w, h=t);
       hull(){
         translate([t/2, t, 0]) cylinder(d=t, h=w);
-        translate([l - t/2, h - t/2, 0]) cylinder(d=t, h=w);
+        translate([l - t/2, h - w/2 + t/2, 0]) cylinder(d=t, h=w);
       }
       hull(){
-        translate([l/2 - t/2, t, 0]) cylinder(d=t, h=w);
-        translate([l - t/2, h - t/2, 0]) cylinder(d=t, h=w);
+        translate([w_dovetail_upper - t/2, t, 0]) cylinder(d=t, h=w);
+        translate([l - t/2, h + w/2 - t/2, 0]) cylinder(d=t, h=w);
+      }
+      hull(){
+        translate([w_dovetail_upper - t/2, t, 0]) cylinder(d=t, h=w);
+        translate([l - t/2, h/2 - t/2, 0]) cylinder(d=t, h=w);
       }
     }
     translate([l, h, w/2]) rotate([0, -90, 0]) translate([0, 0, -0.01]) cylinder(d=D, h=t + 0.02);
@@ -130,14 +140,16 @@ module horn(l, h, t, w, D, d=0, head=0){
     }
   }
 }
-horn(w/2, 50, t_horns, 20, D_pc_hole, 20, 10);
+*horn(w/2, 50, t_horns, 20, D_pc_hole, 20, 10);
 
 // All horns and ruter plate
 module horns(){
   for( y = [-w_pc_horns/2, -l_dovetail + w_pc_horns/2] ){
-    translate([-w_dovetail_upper/2, y, 0]) rotate([90, 0, 0]) horn(w/2 + w_dovetail_upper/2, h_pc_holes - h_dovetail - clearance, t_horns, w_pc_horns, D_pc_hole, head=7);
+    translate([-w_dovetail_upper/2, y, 0]) rotate([90, 0, 0])
+    horn(w/2 + w_dovetail_upper/2, h_pc_holes - h_dovetail - clearance, t_horns, w_pc_horns, D_pc_hole, head=D_pc_washer);
   }
-  translate([w_dovetail_upper/2, -l_dovetail/2 + (PC[1] - hub[1])/2,  0]) rotate([90, 0, 180]) horn(w/2 + w_dovetail_upper/2, h_hub_holes + d_hub_holes/2 - h_dovetail - clearance, t_horns, w_hub_horns, D_hub_hole, d=d_hub_holes, head=12);
+  translate([w_dovetail_upper/2, -l_dovetail/2 + (PC[1] - hub[1])/2,  0]) rotate([90, 0, 180]) 
+  horn(w/2 + w_dovetail_upper/2, h_hub_holes + d_hub_holes/2 - h_dovetail - clearance, t_horns, w_hub_horns, D_hub_hole, d=d_hub_holes, head=D_hub_washer);
 
   hull(){
     translate([-w_dovetail_upper/2, -l_dovetail, 0]) cube([w_dovetail_upper, 5, deck]);
@@ -153,7 +165,7 @@ module connecting_screws(){
 }
 
 module mount(){
-  ys = [-46];
+  ys = [-48];
   difference(){
     union(){
       dovetail(l_dovetail);
@@ -169,7 +181,7 @@ module mount(){
     translate([0, y, deck + 7.5]) cylinder(d=20, h=4);
   }
 }
-!mount();
+mount();
 
 module devices(){
   translate([w/2, -131/2 - l_dovetail/2, -h_dovetail - clearance]) cube(PC);
@@ -206,4 +218,4 @@ module shield(){
     connecting_screws();
   }
 }
-shield();
+!shield();
