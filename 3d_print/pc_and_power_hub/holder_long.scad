@@ -87,10 +87,10 @@ h_cone = 15;
 D_cone = 2*h_cone;
 
 // Cone thickness
-t_cone = 0.25;
+t_cone = 0.4;
 
 // Solar hole
-D_solar_hole = 1.5;
+D_solar_hole = 2;
 
 // PC dimensions
 PC = [19, 131, 82];
@@ -113,23 +113,14 @@ module horn(l, h, t, w, D, d=0, head=0){
   translate([0, 0, -w/2])
   difference(){
     union(){
-      linear_extrude(w){
-        square([l - 2*t, t]);
-        #translate([l - t, 2*t]) square([t, h + w/2 - 2*t - t/2]);
-      }
-      translate([l - 2*t, 2*t]) rotate([0, 0, -90]) rotate_extrude(angle=90) polygon([[t, 0], [2*t, 0], [2*t, w], [t, w]]);
-      //translate([l, h, w/2]) rotate([0, -90, 0]) cylinder(d=w, h=t);
       hull(){
+        linear_extrude(w){
+          square([l - 2*t, t]);
+          #translate([l - t, 2*t]) square([t, h + w/2 - 2*t - t/2]);
+        }
+        translate([l - 2*t, 2*t]) rotate([0, 0, -90]) rotate_extrude(angle=90) polygon([[t, 0], [2*t, 0], [2*t, w], [t, w]]);
         translate([t/2, t, 0]) cylinder(d=t, h=w);
-        translate([l - t/2, h - w/2 + t/2, 0]) cylinder(d=t, h=w);
-      }
-      hull(){
-        translate([w_dovetail_upper - t/2, t, 0]) cylinder(d=t, h=w);
         translate([l - t/2, h + w/2 - t/2, 0]) cylinder(d=t, h=w);
-      }
-      hull(){
-        translate([w_dovetail_upper - t/2, t, 0]) cylinder(d=t, h=w);
-        translate([l - t/2, h/2 - t/2, 0]) cylinder(d=t, h=w);
       }
     }
     translate([l, h, w/2]) rotate([0, -90, 0]) translate([0, 0, -0.01]) cylinder(d=D, h=t + 0.02);
