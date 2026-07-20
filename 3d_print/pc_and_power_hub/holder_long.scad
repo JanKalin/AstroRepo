@@ -72,13 +72,13 @@ w_shield = w + 2*24.5 + 2*extra_shield;
 h_shield = 2*h_hub_holes + 2*extra_shield;
 
 // Distance of shield from the mount
-d_shield = 50;
+d_shield = 70;
 
 // Shield thickness
 t_shield = 1;
 
 // Rib thickness
-t_rib = 1;
+t_rib = 2;
 
 // Cone height
 h_cone = 15;
@@ -90,7 +90,7 @@ D_cone = 2*h_cone;
 t_cone = 0.4;
 
 // Solar hole
-D_solar_hole = 2;
+D_solar_hole = 3;
 
 // PC dimensions
 PC = [19, 131, 82];
@@ -195,7 +195,7 @@ module shield(){
           translate([xz[0], t_shield, xz[1]]) rotate([90, 0, 0]) cylinder(d=t_rib, h=t_shield);
         }
       };
-      for( xz = [[xl, zb], [xl, zm], [xl, zt], [0, zt], [xr, zb], [xr, zm], [xr, zt]] ){
+      for( xz = [[xl, zb], [xl, zt], [xr, zb], [xr, zt]] ){
         hull(){
           translate([xz[0], d_shield, xz[1]]) rotate([90, 0, 0]) cylinder(d=t_rib, h=1);
           translate([0, d_shield, -h_dovetail/2 - clearance/2]) rotate([90, 0, 0]) cylinder(d=t_rib, h=20);
