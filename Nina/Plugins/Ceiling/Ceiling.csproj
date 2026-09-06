@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows7.0</TargetFramework>
+    <OutputType>Library</OutputType>
+
+    <AssemblyName>Ceiling</AssemblyName>
+    <RootNamespace>Ceiling</RootNamespace>
+
+    <UseWPF>true</UseWPF>
+    <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+
+    <Platforms>AnyCPU;x64</Platforms>
+
+    <NoWarn>$(NoWarn);NU1701</NoWarn>    
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NINA.Plugin" Version="3.2.0.9001" />
+    <PackageReference Include="System.ComponentModel.Composition" Version="8.0.0" />
+  </ItemGroup>
+
+  <!--
+    Convenience for local development.
+    Close N.I.N.A. before rebuilding if Windows has the existing DLL locked.
+  -->
+  <Target Name="CopyToNinaPlugins"
+          AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <PropertyGroup>
+      <NinaPluginDir>$(LOCALAPPDATA)\NINA\Plugins\3.0.0\Ceiling</NinaPluginDir>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(NinaPluginDir)" />
+
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(NinaPluginDir)" />
+
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb"
+          DestinationFolder="$(NinaPluginDir)"
+          Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+  </Target>
+
+</Project>
