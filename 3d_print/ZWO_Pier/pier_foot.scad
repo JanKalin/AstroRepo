@@ -1,7 +1,8 @@
 $fn = $preview ? 120 : 720;
+use <threads-scad-master/threads.scad>
 
 // Plate thickness
-t_plate = 15;
+t_plate = 10;
 
 // Pier height
 h_pier = 190;
@@ -75,19 +76,21 @@ pier_holes = [ for( a = pier_hole_angles ) [cos(a)*D_pier_hole/2, sin(a )*D_pier
 // Basic shape
 /////////////////////////////////////////////////////////////////////////////////////////
 
-module basic_shape(){
+module basic_shape(holes=true, expand=0){
   difference(){
     hull(){
-      circle(d=D_pier);
+      circle(d=D_pier + expand);
       for( rail_hole = rail_holes ){
-        translate(rail_hole) circle(d=D_support);
+        translate(rail_hole) circle(d=D_support + expand);
       }
     }
-    for( rail_hole = rail_holes ){
-      translate(rail_hole) circle(d=D_rail_hole);
-    }
-    for( pier_hole = pier_holes ){
-      translate(pier_hole) circle(d=M_pier_hole);
+    if( holes ){
+      for( rail_hole = rail_holes ){
+        translate(rail_hole) circle(d=D_rail_hole);
+      }
+      for( pier_hole = pier_holes ){
+        translate(pier_hole) circle(d=M_pier_hole);
+      }
     }
   }
 }
@@ -111,9 +114,10 @@ module capnut(){
 
 /////////////////////////////////////////////////////////////////////////////////////////
 // 1: 2D shape, 2: 3D shape, 3: 3D shape + debug
+// 4: Barrier for grouting, 5: Bole locator, 6: thread protector
 /////////////////////////////////////////////////////////////////////////////////////////
 
-what = 3;
+what = 5;
 
 if( what == 1 ){
   basic_shape();
@@ -146,4 +150,29 @@ if( what == 3 ){
   w_bar = 150;
   color("green") translate([w_rail, w_rail, 0]) rotate([0, 0, -45]) translate([-150, -w_bar, 0]) cube([300, w_bar, 1]);
 }
-
+if( what == 4 ){
+  linear_extrude(t_plate)
+  difference(){
+    basic_shape(expand=5);
+    basic_shape(expand=0.5);
+  }
+}
+if( what == 5 ){
+  difference(){
+    linear_extrude(t_plate)
+    for( a = rail_holes, b = rail_holes ){
+      if( a == b ){
+        translate(a) circle(d=M_rail_bolts + 4);
+      }
+      else{
+        hull(){
+          translate(a) circle(d=4);
+          translate(b) circle(d=4);
+        }
+      }
+    }
+    for( a = rail_holes ){
+      translate(a) translate([0, 0, -0.01]) ScrewThread(M_rail_bolts, t_plate + 0.02);
+    }
+  }
+}
