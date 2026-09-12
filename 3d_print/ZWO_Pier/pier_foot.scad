@@ -117,7 +117,7 @@ module capnut(){
 // 4: Barrier for grouting, 5: Bole locator, 6: thread protector
 /////////////////////////////////////////////////////////////////////////////////////////
 
-what = 5;
+what = 3;
 
 if( what == 1 ){
   basic_shape();
@@ -126,6 +126,10 @@ if( what == 2 ){
   final_shape();
 }
 if( what == 3 ){
+//  translate([15, -20, 0])
+//  translate([w_rail, w_rail, 0])
+//  rotate([0, 0, -15])
+//  translate([-w_rail, -w_rail, 0])
   translate([w_rail - D_pier/2/sqrt(2), w_rail - D_pier/2/sqrt(2), 0]){
     color("DarkSlateGray") final_shape(flat=true);
     if( $preview ){
@@ -147,8 +151,6 @@ if( what == 3 ){
   color("yellow") translate([0, 0, -h_rail]) cube([300, w_rail, h_rail]);
   color("yellow") translate([0, 0, -h_rail]) cube([w_rail, 300, h_rail]);
   color("yellow") translate([0, 0, -300]) cube([w_rail - 50, w_rail - 50, 300]);
-  w_bar = 150;
-  color("green") translate([w_rail, w_rail, 0]) rotate([0, 0, -45]) translate([-150, -w_bar, 0]) cube([300, w_bar, 1]);
 }
 if( what == 4 ){
   linear_extrude(t_plate)
@@ -159,20 +161,25 @@ if( what == 4 ){
 }
 if( what == 5 ){
   difference(){
-    linear_extrude(t_plate)
-    for( a = rail_holes, b = rail_holes ){
-      if( a == b ){
-        translate(a) circle(d=M_rail_bolts + 4);
-      }
-      else{
-        hull(){
-          translate(a) circle(d=4);
-          translate(b) circle(d=4);
+    union(){
+      linear_extrude(t_plate)
+      for( a = rail_holes, b = rail_holes ){
+        if( a == b ){
+          translate(a) circle(d=M_rail_bolts + 4);
         }
+        else{
+          hull(){
+            translate(a) circle(d=4);
+            translate(b) circle(d=4);
+          }
+        }
+      }
+      for( a = rail_holes ){
+        translate(a) cylinder(d=M_rail_bolts + 6, h=t_plate + 1.6 + 2);
       }
     }
     for( a = rail_holes ){
-      translate(a) translate([0, 0, -0.01]) ScrewThread(M_rail_bolts, t_plate + 0.02);
+      translate(a) translate([0, 0, -0.01]) ScrewThread(M_rail_bolts, t_plate + 1.6 + 2 + 0.02);
     }
   }
 }
