@@ -12,7 +12,7 @@ D_pier = 124;
 echo(str("D_pier = ", D_pier));
 
 // Diameter of pier hole locations
-D_pier_hole = 100.5;
+D_pier_hole = 102;
 echo(str("D_pier_hole = ", D_pier_hole));
 
 // Diameter of pier hole bolts (plus tolerance)
@@ -48,14 +48,14 @@ t_rail_washers = 1.6;
 D_nuts = 13/cos(30);
 
 // Diameter of rail nut support material
-D_support = D_nuts + t_plate;
+D_support = 30.5;
 echo(str("D_support = ", D_support));
 
 // Spanner ring thickness
 t_spanner = 4;
 
 // Generate four rail bolts
-four_bolts = false;
+four_bolts = true;
 
 // DEBUG: show nuts, bolts,...
 debug = true;
@@ -117,7 +117,7 @@ module capnut(){
 // 4: Barrier for grouting, 5: Bole locator, 6: thread protector
 /////////////////////////////////////////////////////////////////////////////////////////
 
-what = 3;
+what = 4;
 
 if( what == 1 ){
   basic_shape();
