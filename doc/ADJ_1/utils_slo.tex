@@ -25,7 +25,7 @@ Letos spomladi sem se navdušil nad astrofotografijo. Pri gledanju videov na You
 
 V mestu je prisotna precejšnja svetlobna onesnaženost. To se do določene mere lahko umili z uporabo ozkopasovnih filtrov, vendar se učinkom v ši\-ro\-ko\-pa\-sov\-nem območju skoraj ne da izogniti. Tolažim se z dejstvom da, ko bom enkrat znal dobiti dokaj dobre slike z balkona, bodo slike dobljene z dobrih lokacij se precej boljše.
 
-Drugi problem je omejeno vidno polje. Konkretno, z mojega balkona je vidno nebo med azimutoma \SI{38}{\degree} in \SI{190}{\degree}, spodnja meja so hiše in drevesa, v nasprotju s fotografiranjem na odprtem pa tudi žleb na robu strehe.
+Drugi problem je omejeno vidno polje. Konkretno, z mojega balkona je vidno nebo med azimutoma \SI{33}{\degree} in \SI{208}{\degree}, spodnja meja so hiše in drevesa, v nasprotju s fotografiranjem na odprtem pa tudi žleb na robu strehe.
 
 Za kontrolo nosilca in kamere uporabljam aplikacijo \href{https://nighttime-imaging.eu/}{\nina}, ki ima možnost uporabe datoteke tipa \texttt{.hrz}, v katerih vrsticah so navedeni pari (azimut, višina) in ki jih \nina zna prikazati kot spodnjo mejo na diagramih. Vendar sta prisotni dve pomanjkljivosti.
 
@@ -54,7 +54,7 @@ Drugi način je interaktiven, ta je bolj primeren za dejansko določanje obzorja
     \item[q/quit:] Izhod iz programa
 \end{description}
 
-Določanje horizonta postane s tem pripomočkom precej preprosto. Sam sem po končanem postopku v datoteko dodal še začetni in končni par (37, 90) in (191, 90), eno ločno stopinjo pred in po dejanskima mejama vidnega območja. Ko vklopiš prikazovanje obzorja v postavki {\em Options $\rightarrow$ Astrometry $\rightarrow$ Custom horizon}, se tedaj na diagramu v \nina pojavita navpični črti, ki jasno določita območje vidljivosti objekta, npr., M33.
+Določanje horizonta postane s tem pripomočkom precej preprosto. Sam sem po končanem postopku v datoteko dodal še začetni in končni par (32, 90) in (209, 90), eno ločno stopinjo pred in po dejanskima mejama vidnega območja. Ko vklopiš prikazovanje obzorja v postavki {\em Options $\rightarrow$ Astrometry $\rightarrow$ Custom horizon}, se tedaj na diagramu v \nina pojavita navpični črti, ki jasno določita območje vidljivosti objekta, npr., M33.
 
 Podobno se omejitev zaradi strehe lahko oceni, ko s pripomočkom določiš pare (azimut, višina) za žleb. Tukaj je koristno biti malo konzervativen in usmeriti teleskop nekaj stopinj nižje od žleba, saj odboj svetlobe lahko pokvari sliko še preden žleb dejansko pride v kader.
 
@@ -66,9 +66,9 @@ Podobno se omejitev zaradi strehe lahko oceni, ko s pripomočkom določiš pare 
 
 Ta pripomoček je na voljo v \url{https://github.com/JanKalin/AstroRepo/tree/main/Python/horizon}
 
-\section{Upoštevanje zgornje meje v \nina}	
+\section{Upoštevanje zgornje meje vidnega polja v \nina}	
 
-Upoštevanje spodnje meje (obzorja) je vgrajeno v \nina v pogoju {\em Advanced Sequencer $\rightarrow$ Loop While Altitude Above Horizon}. Upoštevanje zgornje meja (streha) pa ni vgrajena, saj se pri uporabe \nina predpostavlja prost pogled v nebo. Zato sem razvil vtičnik, ki to omogoči omejitev pogleda navzgor.
+Upoštevanje spodnje meje (obzorja) je vgrajeno v \nina, na primer, v pogoju {\em Advanced Sequencer $\rightarrow$ Loop While Altitude Above Horizon}. Upoštevanje zgornje meja (streha) pa ni vgrajena, saj se pri uporabe \nina predpostavlja prost pogled v nebo. Zato sem razvil vtičnik, ki to omogoči.
 
 Vtičnik se instalira v \nina preprosto tako, da se v direktoriju \path{C:\Users\<USERNAME>\AppData\Local\NINA\Plugins\3.0.0} kreira direktorij \path{Ceiling} in vanj prekopira datoteko \path{Ceiling.dll}. Po ponovnem zagonu \nina se bo med vtičniki pojavil {\em Ceiling}.
 
@@ -79,7 +79,7 @@ Uporaba je prav tako preprosta. V zaporedje ukazov v oknu {\em Sequencer $\right
 	\includegraphics[width=\textwidth]{example.png} 
 \end{figure}
 
-Ko višina preseže mejo določeno v datoteki, se zajemanje slik ustavi, na zaslonu pa izpiše opozorilo:
+Med zajemanjem sproti računa oceno trenutka, ko bo višina presegla zgornjo mejo določeno v datoteki. Ko se to zgodi, se ustavi izvajanje trenutnega ``containter''-ja, na zaslonu pa izpiše opozorilo:
 
 \begin{figure}[H]
 	\centering
