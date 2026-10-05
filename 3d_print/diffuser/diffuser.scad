@@ -42,7 +42,7 @@ t_diff = 4;
 w_rail = 1;
 
 // Positioner thickness
-t_pos = 1;
+t_pos = 0.8;
 
 // Tolerance for reflector and diffuser
 tol = 0.25;
@@ -53,20 +53,20 @@ M = 4;
 // Bolt offset
 offset = 1;
 
+// Scope inner dia7meter
+D_scope_inner = 80;
+
 // Scope outer diameter
 D_scope_outer = 84;
 
-// Scope inner diameter
-D_scope_inner = 80;
-
-// Padding thickness (compressed)
-t_padding = 0.5;
+// Tube inner diameter
+D_tube_inner = 86;
 
 // Height of tube
 h_tube = 50;
 
 // Tube thickness
-t_tube = 4*0.45;
+t_tube = 3*0.65;
 
 // Calculate total thickness
 t_total = t_floor + t_tablet + bezel + t_refl + t_diff + t_pos;
@@ -75,7 +75,7 @@ echo(str("l:", l, ", w: ", w, ", total thickness: ", t_total));
 // Bolts and nuts
 module nb(){
   for( x = [R + offset, l/2, l - R - offset], y = [R + offset, w - R - offset] ){
-    translate([x, y, bezel + t_refl + t_diff + t_pos]) clamp_7380_2_934(M=M, gap=t_total, bolt_centered=true, bolt_length=25, depth_tol=0, nut_tol=0, extra_nut_length=t_total - 25 + 0.01);
+    translate([x, y, bezel + t_refl + t_diff + t_pos]) clamp_7380_2_934(M=M, gap=t_total, bolt_centered=true, bolt_length=25, depth_tol=0, nut_tol=0, extra_nut_length=t_total - 25 + 0.01, extra_bolt_head=2);
   }
 }
 *nb();
@@ -196,9 +196,13 @@ module positioner(){
               translate([l - R, w - R]) circle(r=RR);
             }
           }
-          translate([l/2, w/2, t_pos]) cylinder(d=D_scope_outer + 2*t_padding + 2*t_tube, h=h_tube);
+          translate([l/2, w/2, t_pos]) cylinder(d=D_tube_inner + 2*t_tube, h=h_tube);
         }
-        translate([l/2, w/2, t_pos]) cylinder(d=D_scope_outer + 2*t_padding, h=h_tube + 0.01);
+        translate([l/2, w/2, t_pos]){
+          DD = D_tube_inner - D_scope_outer;
+          cylinder(d1=D_scope_outer, d2=D_tube_inner, h=D_tube_inner - D_scope_outer + 0.01);
+          translate([0, 0, D_tube_inner - D_scope_outer]) cylinder(d=D_tube_inner, h=h_tube - (D_tube_inner - D_scope_outer) + 0.01);
+        }
         translate([l/2, w/2, -0.01]) cylinder(d=D_scope_inner, h=t_pos + 0.02);
       }
     }
@@ -213,7 +217,7 @@ module positioner(){
 // 4: diffuser; 5: diffuser projection; 6: positioner
 ///////////////////////////////////////////////////////////////////////////////////////
 
-what = 4
+what = 6
 ;
 
 if( what == 0 ){
