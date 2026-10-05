@@ -16,8 +16,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
     <Platforms>AnyCPU;x64</Platforms>
-
-    <NoWarn>$(NoWarn);NU1701</NoWarn>    
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

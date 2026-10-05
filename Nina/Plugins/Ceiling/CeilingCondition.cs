@@ -12,6 +12,7 @@ using Microsoft.Win32;
 using Newtonsoft.Json;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
+using NINA.Equipment.Equipment.MyTelescope;
 using NINA.Equipment.Interfaces;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Sequencer.Conditions;
@@ -35,15 +36,18 @@ namespace Ceiling
         {
             return (azimuth % 360.0 + 360.0) % 360.0;
         }
+
+        public static double ShortestAzimuthDelta(double fromAzimuth, double toAzimuth)
+        {
+            double delta = NormalizeAzimuth(toAzimuth) - NormalizeAzimuth(fromAzimuth);
+            if (delta > 180.0) delta -= 360.0;
+            if (delta < -180.0) delta += 360.0;
+            return delta;
+        }
     }
 
     public static class CeilingBoundaryChecker
     {
-        /// <summary>
-        /// Returns the linearly interpolated ceiling altitude at a given azimuth.
-        /// Points are expected to contain at least two distinct azimuths.
-        /// The segment crossing 360/0 degrees is handled explicitly.
-        /// </summary>
         public static double GetCeilingAltitude(
             double currentAzimuth,
             IReadOnlyList<AltAzPoint> points)
@@ -70,16 +74,10 @@ namespace Ceiling
             }
 
             double azSpan = p2.Azimuth - p1.Azimuth;
-            if (azSpan < 0)
-            {
-                azSpan += 360.0;
-            }
+            if (azSpan < 0) azSpan += 360.0;
 
             double azOffset = currentAz - p1.Azimuth;
-            if (azOffset < 0)
-            {
-                azOffset += 360.0;
-            }
+            if (azOffset < 0) azOffset += 360.0;
 
             double fraction = azSpan > 1e-9 ? azOffset / azSpan : 0.0;
             return p1.Altitude + fraction * (p2.Altitude - p1.Altitude);
@@ -92,6 +90,277 @@ namespace Ceiling
         {
             double ceilingAltitude = GetCeilingAltitude(currentAzimuth, points);
             return double.IsFinite(ceilingAltitude) && currentAltitude > ceilingAltitude;
+        }
+    }
+
+    internal sealed class CeilingPrediction
+    {
+        public bool Available { get; init; }
+        public bool AlreadyAbove { get; init; }
+        public bool HasCrossing { get; init; }
+        public TimeSpan TimeToCrossing { get; init; }
+        public DateTime CrossingTimeLocal { get; init; }
+        public double CrossingAzimuth { get; init; } = double.NaN;
+        public double CrossingAltitude { get; init; } = double.NaN;
+        public string Method { get; init; } = string.Empty;
+        public string Reason { get; init; } = string.Empty;
+    }
+
+    internal readonly struct MotionSample
+    {
+        public DateTime Utc { get; }
+        public double Azimuth { get; }
+        public double Altitude { get; }
+
+        public MotionSample(DateTime utc, double azimuth, double altitude)
+        {
+            Utc = utc;
+            Azimuth = azimuth;
+            Altitude = altitude;
+        }
+    }
+
+    internal static class CeilingPredictor
+    {
+        private const double SiderealHoursPerSolarHour = 1.00273790935;
+        private const double DegreesToRadians = Math.PI / 180.0;
+        private const double RadiansToDegrees = 180.0 / Math.PI;
+
+        public static CeilingPrediction PredictFixedEquatorialTrack(
+            double currentAzimuth,
+            double currentAltitude,
+            double rightAscensionHours,
+            double declinationDegrees,
+            double localSiderealTimeHours,
+            double siteLatitudeDegrees,
+            IReadOnlyList<AltAzPoint> boundary,
+            TimeSpan horizon)
+        {
+            if (!double.IsFinite(rightAscensionHours) || rightAscensionHours < 0 || rightAscensionHours >= 24 ||
+                !double.IsFinite(declinationDegrees) || declinationDegrees < -90 || declinationDegrees > 90 ||
+                !double.IsFinite(localSiderealTimeHours) || localSiderealTimeHours < 0 || localSiderealTimeHours >= 24 ||
+                !double.IsFinite(siteLatitudeDegrees) || siteLatitudeDegrees < -90 || siteLatitudeDegrees > 90)
+            {
+                return new CeilingPrediction
+                {
+                    Available = false,
+                    Reason = "mount did not provide usable RA/Dec, sidereal time, or site latitude"
+                };
+            }
+
+            AltAzPoint rawNow = EquatorialToHorizontal(
+                rightAscensionHours,
+                declinationDegrees,
+                localSiderealTimeHours,
+                siteLatitudeDegrees);
+
+            // Anchor the analytical path to the mount's measured current Alt/Az.
+            // This absorbs small epoch/refraction/driver convention offsets while
+            // preserving the curvature of the predicted sky path.
+            double azCorrection = AltAzPoint.ShortestAzimuthDelta(rawNow.Azimuth, currentAzimuth);
+            double altCorrection = currentAltitude - rawNow.Altitude;
+
+            AltAzPoint PositionAt(TimeSpan elapsed)
+            {
+                double futureLst = NormalizeHours(
+                    localSiderealTimeHours +
+                    elapsed.TotalHours * SiderealHoursPerSolarHour);
+
+                AltAzPoint raw = EquatorialToHorizontal(
+                    rightAscensionHours,
+                    declinationDegrees,
+                    futureLst,
+                    siteLatitudeDegrees);
+
+                return new AltAzPoint(
+                    raw.Azimuth + azCorrection,
+                    raw.Altitude + altCorrection);
+            }
+
+            return FindFirstCrossing(
+                PositionAt,
+                boundary,
+                horizon,
+                "sidereal sky-path model");
+        }
+
+        public static CeilingPrediction PredictLinearMotion(
+            MotionSample older,
+            MotionSample newer,
+            IReadOnlyList<AltAzPoint> boundary,
+            TimeSpan horizon)
+        {
+            double dt = (newer.Utc - older.Utc).TotalSeconds;
+            if (dt < 10.0 || dt > 20.0 * 60.0)
+            {
+                return new CeilingPrediction
+                {
+                    Available = false,
+                    Reason = "need two recent telescope-position samples"
+                };
+            }
+
+            double azRate = AltAzPoint.ShortestAzimuthDelta(older.Azimuth, newer.Azimuth) / dt;
+            double altRate = (newer.Altitude - older.Altitude) / dt;
+
+            if (!double.IsFinite(azRate) || !double.IsFinite(altRate))
+            {
+                return new CeilingPrediction
+                {
+                    Available = false,
+                    Reason = "measured telescope motion is invalid"
+                };
+            }
+
+            AltAzPoint PositionAt(TimeSpan elapsed)
+            {
+                double seconds = elapsed.TotalSeconds;
+                return new AltAzPoint(
+                    newer.Azimuth + azRate * seconds,
+                    newer.Altitude + altRate * seconds);
+            }
+
+            return FindFirstCrossing(
+                PositionAt,
+                boundary,
+                horizon,
+                "measured-motion extrapolation");
+        }
+
+        private static CeilingPrediction FindFirstCrossing(
+            Func<TimeSpan, AltAzPoint> positionAt,
+            IReadOnlyList<AltAzPoint> boundary,
+            TimeSpan horizon,
+            string method)
+        {
+            AltAzPoint now = positionAt(TimeSpan.Zero);
+            double nowCeiling = CeilingBoundaryChecker.GetCeilingAltitude(now.Azimuth, boundary);
+            double previousGap = now.Altitude - nowCeiling;
+
+            if (double.IsFinite(previousGap) && previousGap >= 0.0)
+            {
+                return new CeilingPrediction
+                {
+                    Available = true,
+                    AlreadyAbove = true,
+                    HasCrossing = true,
+                    TimeToCrossing = TimeSpan.Zero,
+                    CrossingTimeLocal = DateTime.Now,
+                    CrossingAzimuth = now.Azimuth,
+                    CrossingAltitude = now.Altitude,
+                    Method = method
+                };
+            }
+
+            TimeSpan coarseStep = TimeSpan.FromMinutes(1);
+            TimeSpan previousTime = TimeSpan.Zero;
+
+            for (TimeSpan currentTime = coarseStep;
+                 currentTime <= horizon;
+                 currentTime += coarseStep)
+            {
+                AltAzPoint current = positionAt(currentTime);
+                double ceiling = CeilingBoundaryChecker.GetCeilingAltitude(current.Azimuth, boundary);
+                double gap = current.Altitude - ceiling;
+
+                if (double.IsFinite(previousGap) && double.IsFinite(gap) &&
+                    previousGap < 0.0 && gap >= 0.0)
+                {
+                    TimeSpan low = previousTime;
+                    TimeSpan high = currentTime;
+
+                    // Refine the first crossing to about one second.
+                    while ((high - low).TotalSeconds > 1.0)
+                    {
+                        TimeSpan mid = TimeSpan.FromTicks((low.Ticks + high.Ticks) / 2);
+                        AltAzPoint midPosition = positionAt(mid);
+                        double midCeiling = CeilingBoundaryChecker.GetCeilingAltitude(
+                            midPosition.Azimuth,
+                            boundary);
+                        double midGap = midPosition.Altitude - midCeiling;
+
+                        if (midGap >= 0.0)
+                        {
+                            high = mid;
+                        }
+                        else
+                        {
+                            low = mid;
+                        }
+                    }
+
+                    AltAzPoint crossing = positionAt(high);
+                    double crossingCeiling = CeilingBoundaryChecker.GetCeilingAltitude(
+                        crossing.Azimuth,
+                        boundary);
+
+                    return new CeilingPrediction
+                    {
+                        Available = true,
+                        HasCrossing = true,
+                        TimeToCrossing = high,
+                        CrossingTimeLocal = DateTime.Now + high,
+                        CrossingAzimuth = crossing.Azimuth,
+                        CrossingAltitude = crossingCeiling,
+                        Method = method
+                    };
+                }
+
+                previousGap = gap;
+                previousTime = currentTime;
+            }
+
+            return new CeilingPrediction
+            {
+                Available = true,
+                HasCrossing = false,
+                Method = method,
+                Reason = $"no crossing in the next {horizon.TotalHours:0.#} h"
+            };
+        }
+
+        private static AltAzPoint EquatorialToHorizontal(
+            double rightAscensionHours,
+            double declinationDegrees,
+            double localSiderealTimeHours,
+            double siteLatitudeDegrees)
+        {
+            double hourAngleDegrees = NormalizeSignedDegrees(
+                (localSiderealTimeHours - rightAscensionHours) * 15.0);
+
+            double h = hourAngleDegrees * DegreesToRadians;
+            double dec = declinationDegrees * DegreesToRadians;
+            double lat = siteLatitudeDegrees * DegreesToRadians;
+
+            double sinAltitude =
+                Math.Sin(dec) * Math.Sin(lat) +
+                Math.Cos(dec) * Math.Cos(lat) * Math.Cos(h);
+
+            sinAltitude = Math.Clamp(sinAltitude, -1.0, 1.0);
+            double altitude = Math.Asin(sinAltitude);
+
+            // Azimuth is measured from north through east, matching ASCOM/N.I.N.A.
+            double y = -Math.Sin(h) * Math.Cos(dec);
+            double x =
+                Math.Sin(dec) * Math.Cos(lat) -
+                Math.Cos(dec) * Math.Sin(lat) * Math.Cos(h);
+
+            double azimuth = Math.Atan2(y, x) * RadiansToDegrees;
+            azimuth = AltAzPoint.NormalizeAzimuth(azimuth);
+
+            return new AltAzPoint(azimuth, altitude * RadiansToDegrees);
+        }
+
+        private static double NormalizeHours(double hours)
+        {
+            return (hours % 24.0 + 24.0) % 24.0;
+        }
+
+        private static double NormalizeSignedDegrees(double degrees)
+        {
+            double normalized = (degrees % 360.0 + 360.0) % 360.0;
+            if (normalized > 180.0) normalized -= 360.0;
+            return normalized;
         }
     }
 
@@ -112,16 +381,28 @@ namespace Ceiling
         private List<AltAzPoint> _cachedPoints = new();
         private DateTime _lastFileWriteUtc = DateTime.MinValue;
 
-        // The fallback is retained deliberately because some setups have previously
-        // reported a connected telescope through the UI context while the mediator
-        // did not provide usable Alt/Az data.
         private ITelescope? _cachedFallbackTelescope;
         private bool _fallbackUseLogged;
 
         private IList<string> _issues = new List<string>();
 
+        private double _predictionHorizonHours = 8.0;
+        private bool _enableAdvanceWarning;
+        private double _advanceWarningMinutes = 10.0;
+
+        private string _currentPositionText = "Current: unavailable";
+        private string _ceilingEstimateText = "Estimated ceiling: not calculated";
+        private string _predictionMethodText = string.Empty;
+
+        private MotionSample? _olderMotionSample;
+        private MotionSample? _newerMotionSample;
+        private DateTime? _advanceWarningForCrossingLocal;
+
         [JsonIgnore]
         public ICommand BrowseFileCommand { get; }
+
+        [JsonIgnore]
+        public ICommand RefreshEstimateCommand { get; }
 
         public IList<string> Issues
         {
@@ -130,6 +411,48 @@ namespace Ceiling
             {
                 _issues = value;
                 RaisePropertyChanged();
+            }
+        }
+
+        [JsonIgnore]
+        public string CurrentPositionText
+        {
+            get => _currentPositionText;
+            private set
+            {
+                if (_currentPositionText != value)
+                {
+                    _currentPositionText = value;
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public string CeilingEstimateText
+        {
+            get => _ceilingEstimateText;
+            private set
+            {
+                if (_ceilingEstimateText != value)
+                {
+                    _ceilingEstimateText = value;
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public string PredictionMethodText
+        {
+            get => _predictionMethodText;
+            private set
+            {
+                if (_predictionMethodText != value)
+                {
+                    _predictionMethodText = value;
+                    RaisePropertyChanged();
+                }
             }
         }
 
@@ -150,6 +473,7 @@ namespace Ceiling
             }
 
             BrowseFileCommand = new DelegateCommand(BrowseFile);
+            RefreshEstimateCommand = new DelegateCommand(() => RefreshEstimate(false));
         }
 
         private CeilingCondition(CeilingCondition cloneMe)
@@ -157,6 +481,9 @@ namespace Ceiling
         {
             CopyMetaData(cloneMe);
             CeilingFilePath = cloneMe.CeilingFilePath;
+            PredictionHorizonHours = cloneMe.PredictionHorizonHours;
+            EnableAdvanceWarning = cloneMe.EnableAdvanceWarning;
+            AdvanceWarningMinutes = cloneMe.AdvanceWarningMinutes;
         }
 
         [JsonProperty]
@@ -174,9 +501,54 @@ namespace Ceiling
 
                 _ceilingFilePath = newValue;
                 InvalidateFileCache();
-
                 RaisePropertyChanged();
                 Validate();
+            }
+        }
+
+        [JsonProperty]
+        public double PredictionHorizonHours
+        {
+            get => _predictionHorizonHours;
+            set
+            {
+                if (Math.Abs(_predictionHorizonHours - value) > 1e-9)
+                {
+                    _predictionHorizonHours = value;
+                    RaisePropertyChanged();
+                    Validate();
+                }
+            }
+        }
+
+        [JsonProperty]
+        public bool EnableAdvanceWarning
+        {
+            get => _enableAdvanceWarning;
+            set
+            {
+                if (_enableAdvanceWarning != value)
+                {
+                    _enableAdvanceWarning = value;
+                    _advanceWarningForCrossingLocal = null;
+                    RaisePropertyChanged();
+                }
+            }
+        }
+
+        [JsonProperty]
+        public double AdvanceWarningMinutes
+        {
+            get => _advanceWarningMinutes;
+            set
+            {
+                if (Math.Abs(_advanceWarningMinutes - value) > 1e-9)
+                {
+                    _advanceWarningMinutes = value;
+                    _advanceWarningForCrossingLocal = null;
+                    RaisePropertyChanged();
+                    Validate();
+                }
             }
         }
 
@@ -209,6 +581,7 @@ namespace Ceiling
             if (dialog.ShowDialog() == true)
             {
                 CeilingFilePath = dialog.FileName;
+                RefreshEstimate(false);
             }
         }
 
@@ -218,14 +591,6 @@ namespace Ceiling
             _lastFileWriteUtc = DateTime.MinValue;
         }
 
-        /// <summary>
-        /// Loads and normalizes the ceiling polyline.
-        ///
-        /// Parsing remains deliberately permissive to preserve compatibility with
-        /// horizon files that contain headers or extra non-data lines. Such lines
-        /// are logged and skipped. Duplicate 0/360 entries with the same altitude
-        /// are collapsed. Conflicting duplicate azimuths invalidate the boundary.
-        /// </summary>
         private List<AltAzPoint> LoadPointsFromFile(out string? error)
         {
             error = null;
@@ -331,10 +696,7 @@ namespace Ceiling
         {
             error = null;
 
-            var sorted = points
-                .OrderBy(p => p.Azimuth)
-                .ToList();
-
+            var sorted = points.OrderBy(p => p.Azimuth).ToList();
             var result = new List<AltAzPoint>();
 
             foreach (AltAzPoint point in sorted)
@@ -357,8 +719,6 @@ namespace Ceiling
                         return new List<AltAzPoint>();
                     }
 
-                    // Same azimuth and effectively the same altitude, e.g. 0° and 360°.
-                    // Keep one copy.
                     continue;
                 }
 
@@ -371,9 +731,12 @@ namespace Ceiling
         private bool TryGetCoordinates(
             out double azimuth,
             out double altitude,
-            out string source)
+            out string source,
+            out TelescopeInfo? telescopeInfo)
         {
-            if (TryGetCoordinatesFromMediator(out azimuth, out altitude))
+            telescopeInfo = null;
+
+            if (TryGetCoordinatesFromMediator(out azimuth, out altitude, out telescopeInfo))
             {
                 source = "ITelescopeMediator";
                 return true;
@@ -394,28 +757,33 @@ namespace Ceiling
                 return true;
             }
 
+            azimuth = 0;
+            altitude = 0;
             source = "none";
             return false;
         }
 
         private bool TryGetCoordinatesFromMediator(
             out double azimuth,
-            out double altitude)
+            out double altitude,
+            out TelescopeInfo? telescopeInfo)
         {
             azimuth = 0;
             altitude = 0;
+            telescopeInfo = null;
 
             try
             {
-                var telescopeInfo = _telescopeMediator.GetInfo();
+                TelescopeInfo info = _telescopeMediator.GetInfo();
 
-                if (telescopeInfo != null &&
-                    telescopeInfo.Connected &&
-                    double.IsFinite(telescopeInfo.Azimuth) &&
-                    double.IsFinite(telescopeInfo.Altitude))
+                if (info != null &&
+                    info.Connected &&
+                    double.IsFinite(info.Azimuth) &&
+                    double.IsFinite(info.Altitude))
                 {
-                    azimuth = telescopeInfo.Azimuth;
-                    altitude = telescopeInfo.Altitude;
+                    azimuth = info.Azimuth;
+                    altitude = info.Altitude;
+                    telescopeInfo = info;
                     return true;
                 }
             }
@@ -428,10 +796,6 @@ namespace Ceiling
             return false;
         }
 
-        /// <summary>
-        /// Compatibility fallback retained from the working v1.0 implementation.
-        /// It is only used when ITelescopeMediator cannot provide valid coordinates.
-        /// </summary>
         private bool TryGetCoordinatesFromUiFallback(
             out double azimuth,
             out double altitude)
@@ -453,7 +817,6 @@ namespace Ceiling
             {
                 Action resolve = () =>
                 {
-                    // Reuse the previously resolved telescope while it remains connected.
                     if (_cachedFallbackTelescope is { Connected: true } cached &&
                         double.IsFinite(cached.Azimuth) &&
                         double.IsFinite(cached.Altitude))
@@ -469,16 +832,10 @@ namespace Ceiling
                     foreach (Window window in app.Windows.OfType<Window>())
                     {
                         object? dataContext = window.DataContext;
-                        if (dataContext == null)
-                        {
-                            continue;
-                        }
+                        if (dataContext == null) continue;
 
                         ITelescope? telescope = FindConnectedTelescope(dataContext, 0);
-                        if (telescope == null || !telescope.Connected)
-                        {
-                            continue;
-                        }
+                        if (telescope == null || !telescope.Connected) continue;
 
                         if (!double.IsFinite(telescope.Azimuth) ||
                             !double.IsFinite(telescope.Altitude))
@@ -494,14 +851,8 @@ namespace Ceiling
                     }
                 };
 
-                if (app.Dispatcher.CheckAccess())
-                {
-                    resolve();
-                }
-                else
-                {
-                    app.Dispatcher.Invoke(resolve);
-                }
+                if (app.Dispatcher.CheckAccess()) resolve();
+                else app.Dispatcher.Invoke(resolve);
 
                 if (retrieved)
                 {
@@ -521,10 +872,7 @@ namespace Ceiling
 
         private static ITelescope? FindConnectedTelescope(object? root, int depth)
         {
-            if (root == null || depth > 4)
-            {
-                return null;
-            }
+            if (root == null || depth > 4) return null;
 
             if (root is ITelescope direct && direct.Connected)
             {
@@ -533,9 +881,7 @@ namespace Ceiling
 
             Type type = root.GetType();
 
-            if (type.IsPrimitive ||
-                type == typeof(string) ||
-                type.IsValueType)
+            if (type.IsPrimitive || type == typeof(string) || type.IsValueType)
             {
                 return null;
             }
@@ -553,10 +899,7 @@ namespace Ceiling
 
             foreach (PropertyInfo property in properties)
             {
-                if (property.GetIndexParameters().Length > 0)
-                {
-                    continue;
-                }
+                if (property.GetIndexParameters().Length > 0) continue;
 
                 try
                 {
@@ -564,8 +907,7 @@ namespace Ceiling
 
                     if (typeof(ITelescope).IsAssignableFrom(propertyType))
                     {
-                        if (property.GetValue(root) is ITelescope telescope &&
-                            telescope.Connected)
+                        if (property.GetValue(root) is ITelescope telescope && telescope.Connected)
                         {
                             return telescope;
                         }
@@ -577,31 +919,313 @@ namespace Ceiling
                         propertyType.Name.Contains("Equipment", StringComparison.OrdinalIgnoreCase) ||
                         property.Name.Contains("Equipment", StringComparison.OrdinalIgnoreCase);
 
-                    if (!looksRelevant)
-                    {
-                        continue;
-                    }
+                    if (!looksRelevant) continue;
 
                     object? nestedValue = property.GetValue(root);
-                    if (nestedValue == null)
-                    {
-                        continue;
-                    }
+                    if (nestedValue == null) continue;
 
                     ITelescope? nested = FindConnectedTelescope(nestedValue, depth + 1);
-                    if (nested is { Connected: true })
-                    {
-                        return nested;
-                    }
+                    if (nested is { Connected: true }) return nested;
                 }
                 catch
                 {
-                    // Some view-model properties may throw when read. Ignore those
-                    // and keep walking the small telescope/equipment-related subset.
+                    // Some N.I.N.A. view-model properties can throw when inspected.
+                    // Ignore them and continue through telescope/equipment-related nodes.
                 }
             }
 
             return null;
+        }
+
+        private void UpdateMotionSamples(double azimuth, double altitude)
+        {
+            DateTime now = DateTime.UtcNow;
+            var sample = new MotionSample(now, azimuth, altitude);
+
+            if (_newerMotionSample == null)
+            {
+                _newerMotionSample = sample;
+                return;
+            }
+
+            double elapsed = (now - _newerMotionSample.Value.Utc).TotalSeconds;
+
+            // Ignore N.I.N.A.'s repeated condition evaluations that occur milliseconds apart.
+            if (elapsed < 20.0)
+            {
+                return;
+            }
+
+            // If the previous sample is very old, start a fresh pair rather than
+            // extrapolating through a likely slew or long interruption.
+            if (elapsed > 20.0 * 60.0)
+            {
+                _olderMotionSample = null;
+                _newerMotionSample = sample;
+                return;
+            }
+
+            _olderMotionSample = _newerMotionSample;
+            _newerMotionSample = sample;
+        }
+
+        private CeilingPrediction BuildPrediction(
+            IReadOnlyList<AltAzPoint> points,
+            double currentAzimuth,
+            double currentAltitude,
+            TelescopeInfo? telescopeInfo)
+        {
+            double horizonHours = double.IsFinite(PredictionHorizonHours)
+                ? Math.Clamp(PredictionHorizonHours, 0.1, 24.0)
+                : 8.0;
+            TimeSpan horizon = TimeSpan.FromHours(horizonHours);
+
+            if (CeilingBoundaryChecker.IsAboveCeiling(currentAzimuth, currentAltitude, points))
+            {
+                return new CeilingPrediction
+                {
+                    Available = true,
+                    AlreadyAbove = true,
+                    HasCrossing = true,
+                    TimeToCrossing = TimeSpan.Zero,
+                    CrossingTimeLocal = DateTime.Now,
+                    CrossingAzimuth = currentAzimuth,
+                    CrossingAltitude = CeilingBoundaryChecker.GetCeilingAltitude(currentAzimuth, points),
+                    Method = "current position"
+                };
+            }
+
+            if (telescopeInfo != null)
+            {
+                if (telescopeInfo.Slewing)
+                {
+                    return new CeilingPrediction
+                    {
+                        Available = false,
+                        Reason = "mount is slewing"
+                    };
+                }
+
+                if (!telescopeInfo.TrackingEnabled)
+                {
+                    return new CeilingPrediction
+                    {
+                        Available = false,
+                        Reason = "tracking is stopped"
+                    };
+                }
+
+                string trackingMode = GetTrackingModeName(telescopeInfo);
+                bool useFixedEquatorialModel =
+                    trackingMode.Equals("Sidereal", StringComparison.OrdinalIgnoreCase) ||
+                    trackingMode.Equals("King", StringComparison.OrdinalIgnoreCase) ||
+                    trackingMode.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
+
+                if (useFixedEquatorialModel)
+                {
+                    CeilingPrediction sidereal = CeilingPredictor.PredictFixedEquatorialTrack(
+                        currentAzimuth,
+                        currentAltitude,
+                        telescopeInfo.RightAscension,
+                        telescopeInfo.Declination,
+                        telescopeInfo.SiderealTime,
+                        telescopeInfo.SiteLatitude,
+                        points,
+                        horizon);
+
+                    if (sidereal.Available)
+                    {
+                        return sidereal;
+                    }
+                }
+            }
+
+            if (_olderMotionSample.HasValue && _newerMotionSample.HasValue)
+            {
+                return CeilingPredictor.PredictLinearMotion(
+                    _olderMotionSample.Value,
+                    _newerMotionSample.Value,
+                    points,
+                    TimeSpan.FromHours(Math.Min(horizonHours, 2.0)));
+            }
+
+            string modeName = telescopeInfo == null ? "unknown" : GetTrackingModeName(telescopeInfo);
+            return new CeilingPrediction
+            {
+                Available = false,
+                Reason =
+                    $"tracking mode {modeName}; need another position sample for motion extrapolation"
+            };
+        }
+
+        private static string GetTrackingModeName(TelescopeInfo telescopeInfo)
+        {
+            try
+            {
+                return telescopeInfo.TrackingRate.TrackingMode.ToString();
+            }
+            catch
+            {
+                return "Unknown";
+            }
+        }
+
+        private void UpdatePredictionDisplay(
+            IReadOnlyList<AltAzPoint> points,
+            double currentAzimuth,
+            double currentAltitude,
+            string coordinateSource,
+            TelescopeInfo? telescopeInfo,
+            bool allowAdvanceWarning)
+        {
+            double currentCeiling = CeilingBoundaryChecker.GetCeilingAltitude(
+                currentAzimuth,
+                points);
+
+            CurrentPositionText =
+                $"Current: Az {currentAzimuth:F1}°   Alt {currentAltitude:F1}°   " +
+                $"Ceiling {currentCeiling:F1}°";
+
+            UpdateMotionSamples(currentAzimuth, currentAltitude);
+
+            CeilingPrediction prediction = BuildPrediction(
+                points,
+                currentAzimuth,
+                currentAltitude,
+                telescopeInfo);
+
+            if (!prediction.Available)
+            {
+                CeilingEstimateText = $"Estimated ceiling: unavailable — {prediction.Reason}";
+                PredictionMethodText = $"Source: {coordinateSource}";
+                _advanceWarningForCrossingLocal = null;
+                return;
+            }
+
+            if (prediction.AlreadyAbove)
+            {
+                CeilingEstimateText = "Estimated ceiling: reached";
+                PredictionMethodText = $"Source: {coordinateSource}";
+                return;
+            }
+
+            if (!prediction.HasCrossing)
+            {
+                CeilingEstimateText = $"Estimated ceiling: {prediction.Reason}";
+                PredictionMethodText = $"Model: {prediction.Method}; source: {coordinateSource}";
+                _advanceWarningForCrossingLocal = null;
+                return;
+            }
+
+            CeilingEstimateText =
+                $"Estimated ceiling: {FormatDuration(prediction.TimeToCrossing)} " +
+                $"({prediction.CrossingTimeLocal:HH:mm:ss})   " +
+                $"Az {prediction.CrossingAzimuth:F1}° / Alt {prediction.CrossingAltitude:F1}°";
+
+            string trackingMode = telescopeInfo == null ? "unknown" : GetTrackingModeName(telescopeInfo);
+            PredictionMethodText =
+                $"Model: {prediction.Method}; tracking: {trackingMode}; source: {coordinateSource}";
+
+            Logger.Debug(
+                $"CeilingCondition estimate: ETA={prediction.TimeToCrossing}, " +
+                $"Crossing={prediction.CrossingTimeLocal:yyyy-MM-dd HH:mm:ss}, " +
+                $"Az={prediction.CrossingAzimuth:F2}°, Alt={prediction.CrossingAltitude:F2}°, " +
+                $"Method={prediction.Method}, Tracking={trackingMode}");
+
+            if (allowAdvanceWarning)
+            {
+                MaybeShowAdvanceWarning(prediction);
+            }
+        }
+
+        private void MaybeShowAdvanceWarning(CeilingPrediction prediction)
+        {
+            if (!EnableAdvanceWarning ||
+                !prediction.Available ||
+                !prediction.HasCrossing ||
+                prediction.AlreadyAbove ||
+                !double.IsFinite(AdvanceWarningMinutes) ||
+                AdvanceWarningMinutes <= 0.0)
+            {
+                return;
+            }
+
+            TimeSpan warningLead = TimeSpan.FromMinutes(AdvanceWarningMinutes);
+
+            if (prediction.TimeToCrossing <= TimeSpan.Zero ||
+                prediction.TimeToCrossing > warningLead)
+            {
+                if (prediction.TimeToCrossing > warningLead + TimeSpan.FromMinutes(2))
+                {
+                    _advanceWarningForCrossingLocal = null;
+                }
+                return;
+            }
+
+            bool alreadyWarnedForThisCrossing =
+                _advanceWarningForCrossingLocal.HasValue &&
+                Math.Abs(
+                    (_advanceWarningForCrossingLocal.Value - prediction.CrossingTimeLocal)
+                    .TotalMinutes) < 2.0;
+
+            if (alreadyWarnedForThisCrossing)
+            {
+                return;
+            }
+
+            string message =
+                $"Ceiling expected in {FormatDuration(prediction.TimeToCrossing)} " +
+                $"at {prediction.CrossingTimeLocal:HH:mm:ss} " +
+                $"(Az {prediction.CrossingAzimuth:F1}°, Alt {prediction.CrossingAltitude:F1}°).";
+
+            Logger.Info($"CeilingCondition: {message}");
+            Notification.ShowWarning(message);
+            _advanceWarningForCrossingLocal = prediction.CrossingTimeLocal;
+        }
+
+        private void RefreshEstimate(bool allowAdvanceWarning)
+        {
+            List<AltAzPoint> points = LoadPointsFromFile(out string? fileError);
+
+            if (fileError != null || points.Count < 2)
+            {
+                CurrentPositionText = "Current: unavailable";
+                CeilingEstimateText =
+                    $"Estimated ceiling: unavailable — {fileError ?? "invalid boundary"}";
+                PredictionMethodText = string.Empty;
+                return;
+            }
+
+            if (!TryGetCoordinates(
+                    out double currentAzimuth,
+                    out double currentAltitude,
+                    out string coordinateSource,
+                    out TelescopeInfo? telescopeInfo))
+            {
+                CurrentPositionText = "Current: telescope unavailable";
+                CeilingEstimateText = "Estimated ceiling: unavailable — telescope coordinates not resolved";
+                PredictionMethodText = string.Empty;
+                return;
+            }
+
+            UpdatePredictionDisplay(
+                points,
+                currentAzimuth,
+                currentAltitude,
+                coordinateSource,
+                telescopeInfo,
+                allowAdvanceWarning);
+        }
+
+        private static string FormatDuration(TimeSpan time)
+        {
+            if (time.TotalHours >= 1.0)
+            {
+                int hours = (int)Math.Floor(time.TotalHours);
+                return $"{hours:00}:{time.Minutes:00}:{time.Seconds:00}";
+            }
+
+            return $"{time.Minutes:00}:{time.Seconds:00}";
         }
 
         public bool Validate()
@@ -620,9 +1244,21 @@ namespace Ceiling
                     "Ceiling boundary requires at least two distinct valid points.");
             }
 
-            // Deliberately do NOT require a connected telescope here.
-            // This condition is a convenience imaging limit, not a safety interlock,
-            // and sequences may be edited/loaded before the mount is connected.
+            if (!double.IsFinite(PredictionHorizonHours) ||
+                PredictionHorizonHours < 0.1 ||
+                PredictionHorizonHours > 24.0)
+            {
+                validationIssues.Add(
+                    "Prediction horizon must be between 0.1 and 24 hours.");
+            }
+
+            if (!double.IsFinite(AdvanceWarningMinutes) ||
+                AdvanceWarningMinutes < 0.0 ||
+                AdvanceWarningMinutes > 1440.0)
+            {
+                validationIssues.Add(
+                    "Advance warning must be between 0 and 1440 minutes.");
+            }
 
             Issues = validationIssues;
             return validationIssues.Count == 0;
@@ -632,12 +1268,11 @@ namespace Ceiling
         {
             base.AfterParentChanged();
             Validate();
+            RefreshEstimate(false);
         }
 
         public override bool Check(ISequenceItem context, ISequenceItem item)
         {
-            // RunCheck() calls Validate() before Check(), but keep this robust when
-            // Check() is called directly by tests or future code.
             List<AltAzPoint> points = LoadPointsFromFile(out string? fileError);
 
             if (fileError != null || points.Count < 2)
@@ -651,7 +1286,8 @@ namespace Ceiling
             if (!TryGetCoordinates(
                     out double currentAzimuth,
                     out double currentAltitude,
-                    out string coordinateSource))
+                    out string coordinateSource,
+                    out TelescopeInfo? telescopeInfo))
             {
                 Logger.Warning(
                     "CeilingCondition: Active telescope coordinates could not be resolved " +
@@ -666,11 +1302,19 @@ namespace Ceiling
                 double.IsFinite(ceilingAltitude) &&
                 currentAltitude > ceilingAltitude;
 
-            Logger.Info(
+            Logger.Debug(
                 $"CeilingCondition check: Source={coordinateSource}, " +
                 $"Az={currentAzimuth:F2}°, Alt={currentAltitude:F2}°, " +
                 $"Ceiling={ceilingAltitude:F2}°, Points={points.Count}, " +
                 $"IsAboveCeiling={isAbove}");
+
+            UpdatePredictionDisplay(
+                points,
+                currentAzimuth,
+                currentAltitude,
+                coordinateSource,
+                telescopeInfo,
+                allowAdvanceWarning: true);
 
             if (isAbove)
             {
@@ -708,15 +1352,9 @@ namespace Ceiling
                 _execute = execute ?? throw new ArgumentNullException(nameof(execute));
             }
 
-            public bool CanExecute(object? parameter)
-            {
-                return true;
-            }
+            public bool CanExecute(object? parameter) => true;
 
-            public void Execute(object? parameter)
-            {
-                _execute();
-            }
+            public void Execute(object? parameter) => _execute();
 
             public event EventHandler? CanExecuteChanged
             {
