@@ -4,7 +4,6 @@
                     xmlns:local="clr-namespace:Ceiling"
                     xmlns:nina="clr-namespace:NINA.View.Sequencer;assembly=NINA.Sequencer">
 
-    <!-- Solid horizontal ceiling bar + upward arrow -->
     <GeometryGroup x:Key="CeilingLimitSvg" FillRule="Nonzero">
         <RectangleGeometry Rect="2,2,20,2" />
         <PathGeometry Figures="M 12,6 L 6,13 H 10 V 21 H 14 V 13 H 18 Z" />
@@ -13,30 +12,81 @@
     <DataTemplate DataType="{x:Type local:CeilingCondition}">
         <nina:SequenceBlockView DataContext="{Binding}">
             <nina:SequenceBlockView.SequenceItemContent>
-                <StackPanel Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            Margin="5,0">
+                <StackPanel Margin="5,1">
 
-                    <TextBlock Text="Ceiling File:"
-                               Foreground="{DynamicResource PrimaryBrush}"
-                               VerticalAlignment="Center"
-                               Margin="0,0,8,0" />
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Ceiling File:"
+                                   Foreground="{DynamicResource PrimaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
 
-                    <TextBox Text="{Binding CeilingFilePath,
-                                            Mode=TwoWay,
-                                            UpdateSourceTrigger=PropertyChanged}"
-                             Width="280"
-                             Height="22"
-                             VerticalAlignment="Center"
-                             ToolTip="Full path to the .hrz, .txt, or .csv ceiling file" />
+                        <TextBox Text="{Binding CeilingFilePath,
+                                                Mode=TwoWay,
+                                                UpdateSourceTrigger=PropertyChanged}"
+                                 Width="280"
+                                 Height="22"
+                                 VerticalAlignment="Center"
+                                 ToolTip="Full path to the .hrz, .txt, or .csv ceiling file" />
 
-                    <Button Content="..."
-                            Width="26"
-                            Height="22"
-                            Margin="4,0,0,0"
-                            Command="{Binding BrowseFileCommand}"
-                            ToolTip="Browse for ceiling boundary file"
-                            VerticalAlignment="Center" />
+                        <Button Content="..."
+                                Width="26"
+                                Height="22"
+                                Margin="4,0,0,0"
+                                Command="{Binding BrowseFileCommand}"
+                                ToolTip="Browse for ceiling boundary file"
+                                VerticalAlignment="Center" />
+
+                        <Button Content="Refresh ETA"
+                                Height="22"
+                                Margin="8,0,0,0"
+                                Padding="6,0"
+                                Command="{Binding RefreshEstimateCommand}"
+                                ToolTip="Recalculate the ceiling estimate from the current telescope position" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                        <TextBlock Text="Look ahead (h):"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,5,0" />
+                        <TextBox Text="{Binding PredictionHorizonHours,
+                                                Mode=TwoWay,
+                                                UpdateSourceTrigger=LostFocus}"
+                                 Width="42"
+                                 Height="22"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Maximum time searched for the next ceiling crossing (0.1 to 24 h)" />
+
+                        <CheckBox Content="Pre-warn"
+                                  IsChecked="{Binding EnableAdvanceWarning, Mode=TwoWay}"
+                                  VerticalAlignment="Center"
+                                  Margin="14,0,5,0"
+                                  ToolTip="Show one warning before the predicted ceiling crossing" />
+
+                        <TextBox Text="{Binding AdvanceWarningMinutes,
+                                                Mode=TwoWay,
+                                                UpdateSourceTrigger=LostFocus}"
+                                 Width="42"
+                                 Height="22"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Advance warning time in minutes" />
+                        <TextBlock Text=" min"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding CurrentPositionText}"
+                               Margin="0,5,0,0"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Text="{Binding CeilingEstimateText}"
+                               FontWeight="SemiBold"
+                               Margin="0,2,0,0"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Text="{Binding PredictionMethodText}"
+                               Margin="0,1,0,0"
+                               Opacity="0.7"
+                               FontSize="11"
+                               TextWrapping="Wrap" />
 
                 </StackPanel>
             </nina:SequenceBlockView.SequenceItemContent>
