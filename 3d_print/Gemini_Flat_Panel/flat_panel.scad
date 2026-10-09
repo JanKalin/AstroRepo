@@ -1,4 +1,4 @@
-$fn = $preview ? 90 : 360;
+$fn = $preview ? 180 : 360;
 
 // Diameter of dew shield
 D_shield = 84;
@@ -36,14 +36,17 @@ t_flange = 9;
 // Outer width of flanges
 w_flange = d_flange + 2*t_flange;
 
+// Delta Y
+delta_y = 0;
+
 // Flange Y
-y_flange = sqrt((D_ring/2)^2 - (d_flange/2 - h_nut)^2);
+y_flange = sqrt((D_ring/2)^2 - (d_flange/2 - h_nut)^2) + delta_y;
 
 // Bolt collar thickness
 t_collar = 2;
 
 // Clamp gap on each side
-gap = 0.5;
+gap = 0.75;
 
 // Bolt diameter + tolerance
 D_bolt = 3 + 0.25;
@@ -59,18 +62,41 @@ w_nut = 5.5;
 
 // Basic ring
 module ring(){
+  c = 2;
+  y = sqrt((D_shield/2)^2 - (d_flange/2 - h_nut)^2) + delta_y;
+  yy = sqrt((D_shield/2)^2 - (d_flange/2 - h_nut + c)^2) + delta_y;
   translate([0, 0, -l_flange/2])
   linear_extrude(l_flange, convexity=4)
   {
     difference(){
       hull(){
         circle(d=D_ring);
-        translate([-w_flange/2 - t_collar - gap, y_flange]) square([w_flange + 2*t_collar + 2*gap, h_flange]);
+        translate([-w_flange/2 - t_collar - gap, y_flange]) square([w_flange + 2*t_collar + 2*gap, h_flange - c]);
+        translate([-w_flange/2 - t_collar - gap + c, y_flange + h_flange - c]) circle(r=c);
+        translate([w_flange/2 + t_collar + gap - c, y_flange + h_flange - c]) circle(r=c);
       }
       circle(d=D_shield);
-      translate([-d_flange/2 + h_nut, 0]) square([d_flange - 2*h_nut, D_shield + 2*t_ring + 0.01]);
+      translate([-d_flange/2 + h_nut, y]) square([d_flange - 2*h_nut, D_shield + 2*t_ring + 0.01]);
+
+      translate([-d_flange/2 + h_nut, yy])
+      translate([-c, c])
+      rotate([0, 0, -90])
+      difference(){
+        square([c, 2*c]);
+        circle(c);
+      }
+
+      mirror([1, 0, 0])
+      translate([-d_flange/2 + h_nut, yy])
+      translate([-c, c])
+      rotate([0, 0, -90])
+      difference(){
+        square([c, 2*c]);
+        circle(c);
+      }
+
       for( x = [-d_flange/2 - t_flange - gap, d_flange/2 - gap] ){
-        translate([x, y_flange]) square([t_flange + 2*gap, h_flange]);
+        translate([x, y_flange]) square([t_flange + 2*gap, h_flange + 0.01]);
       }
     }
   }
@@ -79,34 +105,25 @@ module ring(){
 
 // Ring with cutouts
 module final(thumbscrews=false){
+  y = y_flange + d_slit + 3/2 + 0.1;
+  x_o = w_flange/2 + t_collar + gap;
+  x_i = d_flange/2;
   difference(){
     ring();
     for( sgn_z = [-1, 1] ){
       z = sgn_z*(l_slit/2 - h_slit/2);
-      y = y_flange + d_slit + h_slit/2;
-      x_o = w_flange/2 + t_collar + gap;
-      x_i = d_flange/2;
-      h_nut_slit = h_slit + d_slit + 5.5/2;
+      h_nut_slit = w_nut;
       translate([0, y, z]){
         rotate([0, 90, 0]) cylinder(d=D_bolt, h=2*x_o + 0.02, center=true);
       }
       for( sgn_x = [-1, 1] ){
-        hull(){
-          for( pm = [-1, 1] ){
-            translate([sgn_x*x_o, y + pm, z]) rotate([0, sgn_x*90, 0]) cylinder(d=thumbscrews && sgn_x == 1 ? D_thumbscrew_collar : D_bolt_collar, h=D_bolt_collar);
-          }
-        }
-        translate([sgn_x*x_i, y_flange, z]) rotate([0, -sgn_x*90, 0]) hull(){
-          translate([-w_nut/2, 0, -0.01]) cube([w_nut, h_nut_slit, 0.01]);
-          translate([-w_nut/2 - h_nut/2, 0, h_nut]) cube([w_nut + h_nut, h_nut_slit, 0.01]);
-        }
+        translate([sgn_x*x_o, y, z]) rotate([0, sgn_x*90, 0]) cylinder(d=thumbscrews && sgn_x == 1 ? D_thumbscrew_collar : D_bolt_collar, h=D_bolt_collar);
+        translate([sgn_x*x_i, y, z]) rotate([0, -sgn_x*90, 0]) translate([-w_nut/2, -w_nut/2, -0.01]) cube([w_nut, h_nut_slit, h_nut + 0.02]);
       }
     }
   }
   %for( sgn_z = [-1, 1] ){
     z = sgn_z*(l_slit/2 - h_slit/2);
-    y = y_flange + d_slit + h_slit/2;
-    x_o = w_flange/2 + t_collar + gap;
     for( sgn_x = [-1, 1] ){
       translate([sgn_x*x_o, y, z]) 
       rotate([0, sgn_x*90, 0])
