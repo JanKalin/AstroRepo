@@ -18,8 +18,11 @@ h_box = 49;
 // Length of flange
 l_flange = 33;
 
-// Flange height
-h_flange = 12;
+// Total flange height
+h_flange_total = 12;
+
+// Live flange height
+h_flange_live = 10;
 
 // Flange slit height
 h_slit = 3.5;
@@ -49,13 +52,13 @@ y_flange = sqrt((D_ring/2)^2 - (d_flange/2)^2) + delta_y;
 t_collar = 2;
 
 // Nut height
-h_nut = 2;
+h_nut = 3;
 
 // Outer gap
-gap_o = 0.5;
+gap_o = 0.25;
 
 // Inner gap
-gap_i = 1.5;
+gap_i = 0.75;
 
 // Bolt diameter + tolerance
 D_bolt = 3 + 0.25;
@@ -73,7 +76,7 @@ w_nut = 5.5;
 D_panel = 127;
 
 // Panel slit diameter
-D_panel_slit = (79.7 - 72.3);
+D_panel_slit = (79.7 - 72.3)/2;
 
 // Panel slit x
 x_panel_slit = (72.3 + 79.7)/2/2;
@@ -87,17 +90,93 @@ y_panel_u = sqrt(80^2 - x_panel_slit^2);
 // Plate plate thickness
 t_panel_plate = 1;
 
-// Panel thickness
-t_panel_panel = 8.5;
+// Panel thickness (1mm are the screws)
+t_panel_panel = 8.5 - t_panel_plate + 1;
 
 // Slit lip
-panel_lip = 5;
+panel_lip = 10;
 
 // Panel height above the box
 h_panel = 21;
 
 // Distance of centre between panel mounting screws to panel flange bottom
 d_panel_mount = (25 + 18)/2;
+
+// Catch depth
+d_catch = 1;
+
+// Distance of catch from the edge
+d_catch2shield = 2;
+
+// Distance between ring and edge of dew shield
+d_ring2shield = h_panel - t_panel_panel + t_panel_plate;
+
+// Hook angle
+a_hook = 10;
+
+// Bed skirt tolerance for panel diameter
+tol_bed_panel_D = 1;
+
+// Bed tolerance for shield diameter
+tol_bed_shield_D = 0.5;
+
+// Bed tolerance for ring diameter
+tol_bed_ring_D = 0.25;
+
+// Height of bed skirt
+h_bed_skirt = t_panel_panel - 1;
+
+// Thickness of bed skirt
+t_bed_skirt = 3*0.45;
+
+// Opening of the skirt
+opening_bed_skirt = 15;
+
+
+
+// Hooks for the bed
+module hook(a=a_hook){
+  rotate([0, 0, -a/2])
+  rotate_extrude(angle=a, convexity=4){
+    translate([D_shield/2, 0, 0])
+    polygon([[0, 0], [t_ring, 0], [t_ring, d_ring2shield - 2*d_catch - d_catch2shield - t_ring], [t_ring - d_catch, d_ring2shield - 1*d_catch - d_catch2shield - t_ring], [t_ring, d_ring2shield - d_catch2shield - t_ring], [d_catch, d_ring2shield - d_catch2shield - d_catch], [0, d_ring2shield - d_catch2shield - d_catch]]);
+  }
+}
+*hook();
+
+module hooks(){
+  for( a = [-60, 120, 210] ){
+    rotate([0, 0, a]) translate([0, 0, l_flange/2])
+    hook();
+  }
+}
+*hooks();
+
+// Bed in which the panel lays down to rest
+module bed(){
+  fillet = 0.33;
+  rotate([0, 0, 45])
+  translate([0, 0, l_flange/2 + d_ring2shield])
+  difference(){
+    rotate_extrude(a=360, convexity=4)
+    polygon([
+    [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring - 2*d_catch],
+    [D_panel/2 + tol_bed_panel_D + t_bed_skirt - fillet, -d_catch2shield - t_ring - 2*d_catch],
+    [D_panel/2 + tol_bed_panel_D + t_bed_skirt, -d_catch2shield - t_ring - 2*d_catch + fillet],
+    [D_panel/2 + tol_bed_panel_D + t_bed_skirt, h_bed_skirt - fillet],
+    [D_panel/2 + tol_bed_panel_D + t_bed_skirt - fillet, h_bed_skirt],
+    [D_panel/2 + tol_bed_panel_D + fillet, h_bed_skirt],
+    [D_panel/2 + tol_bed_panel_D, h_bed_skirt - fillet],
+    [D_panel/2 + tol_bed_panel_D, 0],
+    [D_shield/2 + tol_bed_shield_D, 0],
+    [D_shield/2 + tol_bed_shield_D, -d_catch2shield],
+    [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring],
+    [D_ring/2 + tol_bed_ring_D - d_catch, -d_catch2shield - t_ring - d_catch],
+    [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring - 2*d_catch]]);
+    translate([-opening_bed_skirt/2, 0, 4*d_catch + 0.001]) cube([opening_bed_skirt, 100, t_panel_panel]);
+  }
+}
+*bed();
 
 // Basic ring
 module ring(){
@@ -108,55 +187,75 @@ module ring(){
     difference(){
       hull(){
         circle(d=D_ring);
-        translate([-w_flange/2 - t_collar + c, y_flange + h_flange - c]) circle(r=c);
-        translate([w_flange/2 + t_collar + gap_o - c, y_flange + h_flange - c]) circle(r=c);
+        translate([-w_flange/2 - t_collar + c, y_flange + h_flange_live - c]) circle(r=c);
+        translate([w_flange/2 + t_collar + gap_o - c, y_flange + h_flange_live - c]) circle(r=c);
       }
       circle(d=D_shield);
       translate([-d_flange/2 + h_nut, sqrt((D_shield/2)^2 - (d_flange/2 - h_nut - gap_i)^2)]) square([d_flange - 2*h_nut - gap_i, D_shield + 2*t_ring + 0.01]);
 
-      translate([-d_flange/2, sqrt((D_shield/2)^2 - (d_flange/2)^2)])
+      translate([-d_flange/2 + (h_nut - c), sqrt((D_shield/2)^2 - (d_flange/2 - (h_nut - c))^2)])
       translate([0, c])
       rotate([0, 0, -90])
       difference(){
-        square([h_nut, 2*h_nut]);
-        circle(h_nut);
+        square([c, 2*c]);
+        circle(c);
       }
 
       mirror([1, 0, 0])
-      translate([-d_flange/2 + gap_i, sqrt((D_shield/2)^2 - (d_flange/2 - gap_i)^2)])
+      translate([-d_flange/2 + (h_nut - c) + gap_i, sqrt((D_shield/2)^2 - (d_flange/2 - gap_i - (h_nut - c))^2)])
       translate([0, c])
       rotate([0, 0, -90])
       difference(){
-        square([h_nut, 2*h_nut]);
-        circle(h_nut);
+        square([c, 2*c]);
+        circle(c);
       }
       
-      translate([-d_flange/2 - t_flange, y_flange]) square([t_flange, h_flange + 0.01]);
-      translate([d_flange/2 - gap_i, y_flange]) square([t_flange + gap_o + gap_i, h_flange + 0.01]);
+      translate([-d_flange/2 - t_flange, y_flange]) square([t_flange, h_flange_total + 0.01]);
+      translate([d_flange/2 - gap_i, y_flange]) square([t_flange + gap_o + gap_i, h_flange_total + 0.01]);
     }
   }
 }
 *ring();
 
 // Ring with cutouts
-module final(){
+module main(add_hooks=true){
   y = y_flange + d_slit + 3/2 + 0.1;
   x_o = w_flange/2 + t_collar + gap_o;
   x_i = d_flange/2 - gap_i;
   //color("red", 1)
   difference(){
     ring();
+    translate([0, 0, -l_flange/2 - 0.01]) cylinder(d1=D_shield + 2, d2=D_shield, h=1);
     for( sgn_z = [-1, 1] ){
       z = sgn_z*(l_slit/2 - h_slit/2);
-      h_nut_slit = w_nut;
-      translate([0, y, z]){
-        rotate([0, 90, 0]) cylinder(d=D_bolt, h=2*x_o + 0.02, center=true);
+      hull(){
+        translate([0, y - 1, z]){
+          rotate([0, 90, 0]) cylinder(d=D_bolt, h=2*x_o + 0.02, center=true);
+        }
+        translate([0, y + 1, z]){
+          rotate([0, 90, 0]) cylinder(d=D_bolt, h=2*x_o + 0.02, center=true);
+        }
       }
-      translate([-w_flange/2 - t_collar, y, z]) rotate([0, -90, 0]) cylinder(d=D_bolt_collar, h=D_bolt_collar);
-      translate([w_flange/2 + t_collar + gap_o, y, z]) rotate([0, 90, 0]) cylinder(d=D_thumbscrew_collar, h=D_bolt_collar);
-      translate([-d_flange/2, y, z]) rotate([0, 90, 0]) translate([-w_nut/2, -w_nut/2, -0.01]) cube([w_nut, h_nut_slit, h_nut + 0.02]);
-      translate([d_flange/2 - h_nut + gap_o, y, z]) rotate([0, -90, 0]) translate([-w_nut/2, -w_nut/2, -0.01]) cube([w_nut, h_nut_slit, h_nut + 0.02]);
+      hull(){
+        translate([-w_flange/2 - t_collar, y - 1, z]) rotate([0, -90, 0]) cylinder(d=D_bolt_collar, h=D_bolt_collar);
+        translate([-w_flange/2 - t_collar, y + 1, z]) rotate([0, -90, 0]) cylinder(d=D_bolt_collar, h=D_bolt_collar);
+      }
+      hull(){
+        translate([w_flange/2 + t_collar + gap_o, y - 1, z]) rotate([0, 90, 0]) cylinder(d=D_thumbscrew_collar, h=D_bolt_collar);
+        translate([w_flange/2 + t_collar + gap_o, y + 1, z]) rotate([0, 90, 0]) cylinder(d=D_thumbscrew_collar, h=D_bolt_collar);
+      }
+      hull(){
+        translate([-d_flange/2, y - 1, z]) rotate([0, 90, 0]) translate([-w_nut/2 - 0.25, -w_nut/2, -0.01]) cube([w_nut + 0.5, w_nut, h_nut + 0.02]);
+        translate([-d_flange/2, y + 1, z]) rotate([0, 90, 0]) translate([-w_nut/2 - 0.25, -w_nut/2, -0.01]) cube([w_nut + 0.5, w_nut, h_nut + 0.02]);
+      }
+      hull(){
+        translate([d_flange/2 - gap_i, y - 1, z]) rotate([0, -90, 0]) translate([-w_nut/2 - 0.25, -w_nut/2, -0.01]) cube([w_nut + 0.5, w_nut, h_nut + 0.02]);
+        translate([d_flange/2 - gap_i, y + 1, z]) rotate([0, -90, 0]) translate([-w_nut/2 - 0.25, -w_nut/2, -0.01]) cube([w_nut + 0.5, w_nut, h_nut + 0.02]);
+      }
     }
+  }
+  if( add_hooks ){
+    hooks();
   }
   %for( sgn_z = [-1, 1] ){
     z = sgn_z*(l_slit/2 - h_slit/2);
@@ -176,38 +275,72 @@ module final(){
   }
   //circle(d=D_shield - 0.2);
 }
-final();
+*main();
 
 // Device
 module box(){
   color("grey", 0.25)
   translate([0, y_flange, -l_flange/2]){
-    linear_extrude(l_flange, convexity=4) polygon([[-w_flange/2, 0], [-w_flange/2, h_flange + 1], [-w_box/2, h_flange + 1], [-w_box/2, h_box], [w_box/2, h_box], [w_box/2, h_flange + 1], [w_flange/2, h_flange + 1], [w_flange/2, 0], [d_flange/2, 0], [d_flange/2, h_flange + 1], [-d_flange/2, h_flange + 1], [-d_flange/2, 0]]);
+    linear_extrude(l_flange, convexity=4)
+    polygon([[-w_flange/2, 0], [-w_flange/2, h_flange_total], [-w_box/2, h_flange_total], [-w_box/2, h_box], [w_box/2, h_box], [w_box/2, h_flange_total], [w_flange/2, h_flange_total], [w_flange/2, 0], [d_flange/2, 0], [d_flange/2, h_flange_total], [-d_flange/2, h_flange_total], [-d_flange/2, 0]]);
   }
 }
-%box();
+*box();
  
 // Panel
 module panel(){
-  translate([0, -(y_panel_u + y_panel_l)/2 + y_flange + d_panel_mount, l_flange/2 + h_panel]){
-    color("green", 0.25){
-      cylinder(d=D_panel, h=t_panel_panel);
-      for( sgn_x = [-1, 1] ){
-        translate([sgn_x*x_panel_slit, 0])
-        difference(){
-          hull(){
-            cylinder(d=D_panel_slit + 2*panel_lip, h=t_panel_plate);
-            translate([0, y_panel_u, 0]) cylinder(d=D_panel_slit + 2*panel_lip, h=t_panel_plate);
-          }
-          hull(){
-            translate([0, y_panel_l, -0.01]) cylinder(d=D_panel_slit, h=t_panel_plate + 0.02);
-            translate([0, y_panel_u, -0.01]) cylinder(d=D_panel_slit, h=t_panel_plate + 0.02);
+  translate([0, -(y_panel_u + y_panel_l)/2 + y_flange + d_panel_mount, l_flange/2 + h_panel + t_panel_plate]){
+    rotate([0, 180, 0]){
+      color("green", 0.25){
+        cylinder(d=D_panel, h=t_panel_panel);
+        for( sgn_x = [-1, 1] ){
+          translate([sgn_x*x_panel_slit, 0])
+          difference(){
+            hull(){
+              cylinder(d=D_panel_slit + 2*panel_lip, h=t_panel_plate);
+              translate([0, y_panel_u, 0]) cylinder(d=D_panel_slit + 2*panel_lip, h=t_panel_plate);
+            }
+            hull(){
+              translate([0, y_panel_l, -0.01]) cylinder(d=D_panel_slit, h=t_panel_plate + 0.02);
+              translate([0, y_panel_u, -0.01]) cylinder(d=D_panel_slit, h=t_panel_plate + 0.02);
+            }
           }
         }
       }
     }
-    color("green") translate([0, 0, -l_flange/2 - h_panel]) cylinder(d=1, h=l_flange/2 + h_panel);
+    color("green") translate([0, 0, -l_flange/2 - h_panel - t_panel_plate]) cylinder(d=1, h=l_flange/2 + h_panel + t_panel_plate);
   }
 }
-%panel();
+*panel();
     
+// Lens
+module lens(){
+  color("red")
+  translate([0, 0, -l_flange/2])
+  difference(){
+    cylinder(d=D_shield, h=l_flange + d_ring2shield);
+    translate([0, 0, -0.01]) cylinder(d=D_shield - 2, h=l_flange + d_ring2shield + 0.02);    
+  }
+}
+*lens();
+
+
+// 0: all; 1: main, 2: bed and hooks
+
+what = 1
+;
+
+if( what == 0 ){
+  main(true);
+  box();
+  panel();
+  lens();
+  color("blue", 0.25) bed();
+}
+if( what == 1 ){
+  main();
+}
+if( what == 2 ){
+  %hooks();
+  bed();
+}
