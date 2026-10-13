@@ -90,6 +90,9 @@ y_panel_u = sqrt(80^2 - x_panel_slit^2);
 // Plate plate thickness
 t_panel_plate = 1;
 
+// Plate plate and bolts thickness
+t_panel_plate_and_bolts = 2;
+
 // Panel thickness (1mm are the screws)
 t_panel_panel = 8.5 - t_panel_plate + 1;
 
@@ -112,16 +115,16 @@ d_catch2shield = 2;
 d_ring2shield = h_panel - t_panel_panel + t_panel_plate;
 
 // Hook angle
-a_hook = 10;
+a_hook = 16;
 
 // Bed skirt tolerance for panel diameter
 tol_bed_panel_D = 1;
 
 // Bed tolerance for shield diameter
-tol_bed_shield_D = 0.5;
+tol_bed_shield_D = 0.25;
 
 // Bed tolerance for ring diameter
-tol_bed_ring_D = 0.25;
+tol_bed_ring_D = 0.1;
 
 // Height of bed skirt
 h_bed_skirt = t_panel_panel - 1;
@@ -138,14 +141,15 @@ opening_bed_skirt = 15;
 module hook(a=a_hook){
   rotate([0, 0, -a/2])
   rotate_extrude(angle=a, convexity=4){
-    translate([D_shield/2, 0, 0])
-    polygon([[0, 0], [t_ring, 0], [t_ring, d_ring2shield - 2*d_catch - d_catch2shield - t_ring], [t_ring - d_catch, d_ring2shield - 1*d_catch - d_catch2shield - t_ring], [t_ring, d_ring2shield - d_catch2shield - t_ring], [d_catch, d_ring2shield - d_catch2shield - d_catch], [0, d_ring2shield - d_catch2shield - d_catch]]);
+    translate([D_shield/2, 0])
+    translate([0, -t_panel_plate_and_bolts])
+    polygon([[0, t_panel_plate_and_bolts], [t_ring, t_panel_plate_and_bolts], [t_ring, d_ring2shield - 2*d_catch - d_catch2shield - t_ring], [t_ring - d_catch, d_ring2shield - 1*d_catch - d_catch2shield - t_ring], [t_ring, d_ring2shield - d_catch2shield - t_ring], [d_catch, d_ring2shield - d_catch2shield - d_catch], [0, d_ring2shield - d_catch2shield - d_catch]]);
   }
 }
 *hook();
 
 module hooks(){
-  for( a = [-60, 120, 210] ){
+  for( a = [-90, 30, 150] ){
     rotate([0, 0, a]) translate([0, 0, l_flange/2])
     hook();
   }
@@ -159,6 +163,7 @@ module bed(){
   translate([0, 0, l_flange/2 + d_ring2shield])
   difference(){
     rotate_extrude(a=360, convexity=4)
+    translate([0, -t_panel_plate_and_bolts])
     polygon([
     [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring - 2*d_catch],
     [D_panel/2 + tol_bed_panel_D + t_bed_skirt - fillet, -d_catch2shield - t_ring - 2*d_catch],
@@ -168,12 +173,15 @@ module bed(){
     [D_panel/2 + tol_bed_panel_D + fillet, h_bed_skirt],
     [D_panel/2 + tol_bed_panel_D, h_bed_skirt - fillet],
     [D_panel/2 + tol_bed_panel_D, 0],
+    [D_shield/2 + tol_bed_shield_D + 1, 0],
+    [D_shield/2 + tol_bed_shield_D + 1, t_panel_plate_and_bolts],
+    [D_shield/2 + tol_bed_shield_D, t_panel_plate_and_bolts],
     [D_shield/2 + tol_bed_shield_D, 0],
     [D_shield/2 + tol_bed_shield_D, -d_catch2shield],
     [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring],
     [D_ring/2 + tol_bed_ring_D - d_catch, -d_catch2shield - t_ring - d_catch],
     [D_ring/2 + tol_bed_ring_D, -d_catch2shield - t_ring - 2*d_catch]]);
-    translate([-opening_bed_skirt/2, 0, 4*d_catch + 0.001]) cube([opening_bed_skirt, 100, t_panel_panel]);
+    translate([-opening_bed_skirt/2, D_panel/2, -t_panel_plate_and_bolts + 0.001]) cube([opening_bed_skirt, 3, h_bed_skirt]);
   }
 }
 *bed();
@@ -327,15 +335,15 @@ module lens(){
 
 // 0: all; 1: main, 2: bed and hooks
 
-what = 1
+what = 0
 ;
 
 if( what == 0 ){
   main(true);
-  box();
-  panel();
+//  box();
+//  panel();
   lens();
-  color("blue", 0.25) bed();
+  bed();
 }
 if( what == 1 ){
   main();
